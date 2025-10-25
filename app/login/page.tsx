@@ -62,14 +62,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-cyan-500 via-teal-600 to-emerald-700 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-500 via-violet-600 to-indigo-700 p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-orange-400 to-pink-600 rounded-full mb-4 shadow-lg">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-purple-400 to-pink-600 rounded-full mb-4 shadow-lg">
             <Crop className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-white drop-shadow-lg">Image Cropper</h1>
-          <p className="text-cyan-50 mt-2">Sign in to save and manage your cropped images</p>
+          <p className="text-purple-50 mt-2">Sign in to save and manage your cropped images</p>
         </div>
 
         <Tabs defaultValue="signin" className="w-full">
