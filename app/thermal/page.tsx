@@ -351,6 +351,15 @@ export default function ThermalViewer() {
   const [polygonPoints, setPolygonPoints] = useState<{x: number, y: number}[]>([]);
   const [deltaT, setDeltaT] = useState<{min: number, max: number, delta: number} | null>(null);
   const [temperatureRange, setTemperatureRange] = useState<{min: number, max: number} | null>(null);
+  const [measurementMode, setMeasurementMode] = useState<'polygon' | 'single-box' | 'dual-box'>('polygon');
+  const [box1, setBox1] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
+  const [box2, setBox2] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
+  const [isDrawingBox, setIsDrawingBox] = useState(false);
+  const [currentBox, setCurrentBox] = useState<1 | 2>(1);
+  const [tempBox, setTempBox] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
+  const [mousePos, setMousePos] = useState<{x: number, y: number} | null>(null);
+  const [tempMarkers, setTempMarkers] = useState<{x: number, y: number, temp: number, type: 'min' | 'max'}[]>([]);
+  const [drawingColor, setDrawingColor] = useState('#ff0000');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   function handleFile(file: File) {
@@ -419,9 +428,9 @@ export default function ThermalViewer() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Set canvas dimensions
-    const W = cols;
-    const H = rows;
+    // Set canvas dimensions to match display size
+    const W = 400;
+    const H = 300;
     canvas.width = W;
     canvas.height = H;
 
@@ -439,7 +448,10 @@ export default function ThermalViewer() {
     let k = 0;
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const v = clamp01((grid[y][x] - vmin) / span);
+        // Scale coordinates to grid dimensions
+        const gy = Math.floor((y / H) * rows);
+        const gx = Math.floor((x / W) * cols);
+        const v = clamp01(((grid[gy]?.[gx] ?? 0) - vmin) / span);
         const [r, g, b] = map(v);
         img.data[k++] = r;
         img.data[k++] = g;
@@ -451,15 +463,17 @@ export default function ThermalViewer() {
 
     // Draw polygon on top of thermal image
     if (polygonPoints.length > 0) {
-      ctx.strokeStyle = '#ff0000';
+      ctx.strokeStyle = drawingColor;
       ctx.lineWidth = 3;
       ctx.beginPath();
       
       polygonPoints.forEach((point, index) => {
+        const canvasX = (point.x / cols) * W;
+        const canvasY = (point.y / rows) * H;
         if (index === 0) {
-          ctx.moveTo(point.x, point.y);
+          ctx.moveTo(canvasX, canvasY);
         } else {
-          ctx.lineTo(point.x, point.y);
+          ctx.lineTo(canvasX, canvasY);
         }
       });
       
@@ -470,14 +484,139 @@ export default function ThermalViewer() {
       ctx.stroke();
       
       // Draw points
-      ctx.fillStyle = '#ff0000';
+      ctx.fillStyle = drawingColor;
       polygonPoints.forEach(point => {
+        const canvasX = (point.x / cols) * W;
+        const canvasY = (point.y / rows) * H;
         ctx.beginPath();
-        ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+        ctx.arc(canvasX, canvasY, 4, 0, 2 * Math.PI);
         ctx.fill();
       });
     }
-  }, [grid, palette, rows, cols, polygonPoints, isDrawing]);
+
+    // Draw professional boxes
+    const drawBox = (box: {x1: number, y1: number, x2: number, y2: number}, color: string, label: string) => {
+      const {x1, y1, x2, y2} = box;
+      const canvasX1 = (x1 / cols) * W;
+      const canvasY1 = (y1 / rows) * H;
+      const canvasX2 = (x2 / cols) * W;
+      const canvasY2 = (y2 / rows) * H;
+      
+      const minX = Math.min(canvasX1, canvasX2);
+      const maxX = Math.max(canvasX1, canvasX2);
+      const minY = Math.min(canvasY1, canvasY2);
+      const maxY = Math.max(canvasY1, canvasY2);
+      const width = maxX - minX;
+      const height = maxY - minY;
+      
+      // Draw box with professional styling
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.setLineDash([]);
+      ctx.strokeRect(minX, minY, width, height);
+      
+      // Draw corner markers
+      const cornerSize = 8;
+      ctx.fillStyle = color;
+      ctx.fillRect(minX - cornerSize/2, minY - cornerSize/2, cornerSize, cornerSize);
+      ctx.fillRect(maxX - cornerSize/2, minY - cornerSize/2, cornerSize, cornerSize);
+      ctx.fillRect(minX - cornerSize/2, maxY - cornerSize/2, cornerSize, cornerSize);
+      ctx.fillRect(maxX - cornerSize/2, maxY - cornerSize/2, cornerSize, cornerSize);
+      
+      // Draw label
+      ctx.fillStyle = color;
+      ctx.font = 'bold 12px Arial';
+      ctx.fillText(label, minX + 5, minY - 5);
+    };
+
+    // Draw completed boxes
+    if (box1) {
+      drawBox(box1, drawingColor, 'Box 1');
+    }
+    
+    if (box2) {
+      drawBox(box2, drawingColor, 'Box 2');
+    }
+
+    // Draw temporary box preview
+    if (tempBox) {
+      const {x1, y1, x2, y2} = tempBox;
+      const canvasX1 = (x1 / cols) * W;
+      const canvasY1 = (y1 / rows) * H;
+      const canvasX2 = (x2 / cols) * W;
+      const canvasY2 = (y2 / rows) * H;
+      
+      const minX = Math.min(canvasX1, canvasX2);
+      const maxX = Math.max(canvasX1, canvasX2);
+      const minY = Math.min(canvasY1, canvasY2);
+      const maxY = Math.max(canvasY1, canvasY2);
+      const width = maxX - minX;
+      const height = maxY - minY;
+      
+      // Draw preview box with dashed line
+      ctx.strokeStyle = drawingColor;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(minX, minY, width, height);
+      ctx.setLineDash([]);
+      
+      // Draw crosshair at current position
+      if (mousePos) {
+        const crossX = (mousePos.x / cols) * W;
+        const crossY = (mousePos.y / rows) * H;
+        
+        ctx.strokeStyle = drawingColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(crossX - 10, crossY);
+        ctx.lineTo(crossX + 10, crossY);
+        ctx.moveTo(crossX, crossY - 10);
+        ctx.lineTo(crossX, crossY + 10);
+        ctx.stroke();
+      }
+    }
+
+    // Draw temperature markers
+    tempMarkers.forEach(marker => {
+      const canvasX = (marker.x / cols) * W;
+      const canvasY = (marker.y / rows) * H;
+      
+      // Draw marker circle
+      ctx.fillStyle = marker.type === 'max' ? '#ff0000' : '#0000ff';
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, 8, 0, 2 * Math.PI);
+      ctx.fill();
+      
+      // Draw white border
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // Draw marker label
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 10px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(marker.type.toUpperCase(), canvasX, canvasY - 12);
+      
+      // Draw temperature value
+      ctx.fillStyle = marker.type === 'max' ? '#ff0000' : '#0000ff';
+      ctx.font = 'bold 8px Arial';
+      ctx.fillText(`${marker.temp.toFixed(1)}°C`, canvasX, canvasY + 20);
+    });
+  }, [grid, palette, rows, cols, polygonPoints, isDrawing, box1, box2, tempBox, currentBox, mousePos, tempMarkers, drawingColor]);
+
+  // Auto-calculate delta T when boxes are completed
+  useEffect(() => {
+    if (measurementMode === 'single-box' && box1 && !isDrawingBox) {
+      calculateBoxDeltaT();
+    }
+  }, [box1, measurementMode, isDrawingBox]);
+
+  useEffect(() => {
+    if (measurementMode === 'dual-box' && box1 && box2 && !isDrawingBox) {
+      calculateDualBoxDeltaT();
+    }
+  }, [box1, box2, measurementMode, isDrawingBox]);
 
   // Handle mouse hover to show temperature
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -505,6 +644,14 @@ export default function ThermalViewer() {
         y: gridY,
         temperature: temperature
       });
+      
+      // Update mouse position for box drawing
+      setMousePos({x: gridX, y: gridY});
+      
+      // Update temporary box for real-time preview
+      if (isDrawingBox && tempBox) {
+        setTempBox(prev => prev ? {...prev, x2: gridX, y2: gridY} : null);
+      }
     } else {
       setHoverInfo(null);
     }
@@ -515,8 +662,8 @@ export default function ThermalViewer() {
       if (ctx) {
         // Redraw the thermal image first using the same method as main draw
         if (grid.length > 0) {
-          const W = cols;
-          const H = rows;
+          const W = 400;
+          const H = 300;
           const img = ctx.createImageData(W, H);
           
           // Use the same thermal rendering logic as the main draw function
@@ -529,7 +676,9 @@ export default function ThermalViewer() {
           let k = 0;
           for (let y = 0; y < H; y++) {
             for (let x = 0; x < W; x++) {
-              const v = clamp01((grid[y][x] - vmin) / span);
+              const gy = Math.floor((y / H) * rows);
+              const gx = Math.floor((x / W) * cols);
+              const v = clamp01(((grid[gy]?.[gx] ?? 0) - vmin) / span);
               const [r, g, b] = map(v);
               img.data[k++] = r;
               img.data[k++] = g;
@@ -542,36 +691,45 @@ export default function ThermalViewer() {
 
         // Draw existing polygon
         if (polygonPoints.length > 0) {
-          ctx.strokeStyle = '#ff0000';
+          ctx.strokeStyle = drawingColor;
           ctx.lineWidth = 3;
           ctx.beginPath();
           
           polygonPoints.forEach((point, index) => {
+            const canvasX = (point.x / cols) * 400;
+            const canvasY = (point.y / rows) * 300;
             if (index === 0) {
-              ctx.moveTo(point.x, point.y);
+              ctx.moveTo(canvasX, canvasY);
             } else {
-              ctx.lineTo(point.x, point.y);
+              ctx.lineTo(canvasX, canvasY);
             }
           });
           ctx.stroke();
           
           // Draw existing points
-          ctx.fillStyle = '#ff0000';
+          ctx.fillStyle = drawingColor;
           polygonPoints.forEach(point => {
+            const canvasX = (point.x / cols) * 400;
+            const canvasY = (point.y / rows) * 300;
             ctx.beginPath();
-            ctx.arc(point.x, point.y, 4, 0, 2 * Math.PI);
+            ctx.arc(canvasX, canvasY, 4, 0, 2 * Math.PI);
             ctx.fill();
           });
         }
         
         // Draw preview line to current mouse position
         const lastPoint = polygonPoints[polygonPoints.length - 1];
-        ctx.strokeStyle = '#ff0000';
+        const lastCanvasX = (lastPoint.x / cols) * 400;
+        const lastCanvasY = (lastPoint.y / rows) * 300;
+        const currentCanvasX = (gridX / cols) * 400;
+        const currentCanvasY = (gridY / rows) * 300;
+        
+        ctx.strokeStyle = drawingColor;
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 5]);
         ctx.beginPath();
-        ctx.moveTo(lastPoint.x, lastPoint.y);
-        ctx.lineTo(x, y);
+        ctx.moveTo(lastCanvasX, lastCanvasY);
+        ctx.lineTo(currentCanvasX, currentCanvasY);
         ctx.stroke();
         ctx.setLineDash([]);
       }
@@ -599,12 +757,15 @@ export default function ThermalViewer() {
     if (polygonPoints.length < 3 || !grid.length) return;
 
     const temperatures: number[] = [];
+    const pointsInPolygon: {x: number, y: number, temp: number}[] = [];
     
     // Check each pixel in the grid
     for (let y = 0; y < rows; y++) {
       for (let x = 0; x < cols; x++) {
         if (pointInPolygon({x, y}, polygonPoints)) {
-          temperatures.push(grid[y][x]);
+          const temp = grid[y][x];
+          temperatures.push(temp);
+          pointsInPolygon.push({x, y, temp});
         }
       }
     }
@@ -614,39 +775,183 @@ export default function ThermalViewer() {
       const max = Math.max(...temperatures);
       const delta = max - min;
       setDeltaT({min, max, delta});
+      
+      // Find and mark the min/max temperature locations
+      const minPoint = pointsInPolygon.find(p => p.temp === min);
+      const maxPoint = pointsInPolygon.find(p => p.temp === max);
+      
+      const markers: {x: number, y: number, temp: number, type: 'min' | 'max'}[] = [];
+      if (minPoint) markers.push({...minPoint, type: 'min'});
+      if (maxPoint) markers.push({...maxPoint, type: 'max'});
+      setTempMarkers(markers);
     }
   };
 
-  // Handle polygon drawing
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !canvasRef.current || rows === 0 || cols === 0) return;
-
-    // Handle right-click to complete polygon
-    if (e.button === 2) {
-      e.preventDefault();
-      if (polygonPoints.length >= 3) {
-        setIsDrawing(false);
-        calculateDeltaT();
+  // Calculate delta T for single box
+  const calculateBoxDeltaT = () => {
+    if (!box1 || !grid.length) return;
+    
+    const temperatures: number[] = [];
+    const pointsInBox: {x: number, y: number, temp: number}[] = [];
+    const {x1, y1, x2, y2} = box1;
+    const minX = Math.min(x1, x2);
+    const maxX = Math.max(x1, x2);
+    const minY = Math.min(y1, y2);
+    const maxY = Math.max(y1, y2);
+    
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        if (y >= 0 && y < rows && x >= 0 && x < cols) {
+          const temp = grid[y][x];
+          temperatures.push(temp);
+          pointsInBox.push({x, y, temp});
+        }
       }
-      return;
     }
+    
+    if (temperatures.length > 0) {
+      const min = Math.min(...temperatures);
+      const max = Math.max(...temperatures);
+      const delta = max - min;
+      setDeltaT({min, max, delta});
+      
+      // Find and mark the min/max temperature locations
+      const minPoint = pointsInBox.find(p => p.temp === min);
+      const maxPoint = pointsInBox.find(p => p.temp === max);
+      
+      const markers: {x: number, y: number, temp: number, type: 'min' | 'max'}[] = [];
+      if (minPoint) markers.push({...minPoint, type: 'min'});
+      if (maxPoint) markers.push({...maxPoint, type: 'max'});
+      setTempMarkers(markers);
+      
+      console.log(`Single box delta T: min=${min.toFixed(2)}, max=${max.toFixed(2)}, delta=${delta.toFixed(2)}`);
+    }
+  };
 
-    // Handle left-click to add point
-    if (e.button === 0) {
-      const canvas = canvasRef.current;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+  // Calculate delta T for dual boxes
+  const calculateDualBoxDeltaT = () => {
+    if (!box1 || !box2 || !grid.length) return;
+    
+    const getBoxMaxTempAndLocation = (box: {x1: number, y1: number, x2: number, y2: number}) => {
+      const temperatures: number[] = [];
+      const pointsInBox: {x: number, y: number, temp: number}[] = [];
+      const {x1, y1, x2, y2} = box;
+      const minX = Math.min(x1, x2);
+      const maxX = Math.max(x1, x2);
+      const minY = Math.min(y1, y2);
+      const maxY = Math.max(y1, y2);
       
-      const x = Math.floor((e.clientX - rect.left) * scaleX);
-      const y = Math.floor((e.clientY - rect.top) * scaleY);
+      for (let y = minY; y <= maxY; y++) {
+        for (let x = minX; x <= maxX; x++) {
+          if (y >= 0 && y < rows && x >= 0 && x < cols) {
+            const temp = grid[y][x];
+            temperatures.push(temp);
+            pointsInBox.push({x, y, temp});
+          }
+        }
+      }
       
-      // Convert canvas coordinates to grid coordinates
-      const gridX = Math.floor((x / canvas.width) * cols);
-      const gridY = Math.floor((y / canvas.height) * rows);
-      
-      if (gridY >= 0 && gridY < rows && gridX >= 0 && gridX < cols) {
+      if (temperatures.length > 0) {
+        const max = Math.max(...temperatures);
+        const maxPoint = pointsInBox.find(p => p.temp === max);
+        return {max, maxPoint};
+      }
+      return {max: 0, maxPoint: null};
+    };
+    
+    const result1 = getBoxMaxTempAndLocation(box1);
+    const result2 = getBoxMaxTempAndLocation(box2);
+    const max1 = result1.max;
+    const max2 = result2.max;
+    const delta = Math.abs(max1 - max2);
+    
+    setDeltaT({
+      min: Math.min(max1, max2),
+      max: Math.max(max1, max2),
+      delta
+    });
+    
+    // Mark the max temperature locations from each box
+    const markers: {x: number, y: number, temp: number, type: 'min' | 'max'}[] = [];
+    if (result1.maxPoint) markers.push({...result1.maxPoint, type: max1 > max2 ? 'max' : 'min'});
+    if (result2.maxPoint) markers.push({...result2.maxPoint, type: max2 > max1 ? 'max' : 'min'});
+    setTempMarkers(markers);
+    
+    console.log(`Dual box delta T: Box1 max=${max1.toFixed(2)}, Box2 max=${max2.toFixed(2)}, delta=${delta.toFixed(2)}`);
+  };
+
+  // Handle canvas interactions for different measurement modes
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current || rows === 0 || cols === 0) return;
+
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = Math.floor((e.clientX - rect.left) * scaleX);
+    const y = Math.floor((e.clientY - rect.top) * scaleY);
+    
+    // Convert canvas coordinates to grid coordinates
+    const gridX = Math.floor((x / canvas.width) * cols);
+    const gridY = Math.floor((y / canvas.height) * rows);
+    
+    if (gridY < 0 || gridY >= rows || gridX < 0 || gridX >= cols) return;
+
+    if (measurementMode === 'polygon') {
+      if (!isDrawing) return;
+
+      // Handle right-click to complete polygon
+      if (e.button === 2) {
+        e.preventDefault();
+        if (polygonPoints.length >= 3) {
+          setIsDrawing(false);
+          calculateDeltaT();
+        }
+        return;
+      }
+
+      // Handle left-click to add point
+      if (e.button === 0) {
         setPolygonPoints(prev => [...prev, {x: gridX, y: gridY}]);
+      }
+    } else if (measurementMode === 'single-box' || measurementMode === 'dual-box') {
+      if (!isDrawingBox) return;
+
+      if (e.button === 0) {
+        if (measurementMode === 'single-box') {
+          if (!tempBox) {
+            // Start drawing first box
+            setTempBox({x1: gridX, y1: gridY, x2: gridX, y2: gridY});
+          } else {
+            // Complete first box
+            setBox1(tempBox);
+            setTempBox(null);
+            setIsDrawingBox(false);
+          }
+        } else if (measurementMode === 'dual-box') {
+          if (currentBox === 1) {
+            if (!tempBox) {
+              // Start drawing first box
+              setTempBox({x1: gridX, y1: gridY, x2: gridX, y2: gridY});
+            } else {
+              // Complete first box, start second
+              setBox1(tempBox);
+              setTempBox(null);
+              setCurrentBox(2);
+            }
+          } else {
+            if (!tempBox) {
+              // Start drawing second box
+              setTempBox({x1: gridX, y1: gridY, x2: gridX, y2: gridY});
+            } else {
+              // Complete second box
+              setBox2(tempBox);
+              setTempBox(null);
+              setIsDrawingBox(false);
+            }
+          }
+        }
       }
     }
   };
@@ -703,6 +1008,283 @@ export default function ThermalViewer() {
     setIsDrawing(false);
   };
 
+  // Render the full component content when mounted
+  const renderContent = () => {
+    return (
+      <>
+        {/* Controls Header */}
+        <div className="bg-gray-50 px-6 py-4 border-b border-border">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Upload className="w-4 h-4 text-muted-foreground" />
+            <input 
+              type="file" 
+              accept=".csv" 
+              onChange={(e)=>{
+                const f = e.target.files?.[0];
+                if (f) handleFile(f);
+              }} 
+              disabled={isLoading}
+              className="text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 disabled:opacity-50"
+            />
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Palette className="w-4 h-4 text-muted-foreground" />
+            <select 
+              value={palette} 
+              onChange={(e)=>setPalette(e.target.value as any)} 
+              disabled={isLoading}
+                className="border rounded-lg px-3 py-2 bg-background text-foreground border-border disabled:opacity-50 min-w-[140px]"
+            >
+              {Object.keys(palettes).map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-foreground">Mode:</span>
+          <select 
+            value={measurementMode} 
+            onChange={(e) => {
+              const mode = e.target.value as 'polygon' | 'single-box' | 'dual-box';
+              setMeasurementMode(mode);
+              setIsDrawing(false);
+              setIsDrawingBox(false);
+              setPolygonPoints([]);
+              setBox1(null);
+              setBox2(null);
+              setDeltaT(null);
+              setTempMarkers([]);
+            }}
+            disabled={isLoading || !grid.length}
+            className="border rounded-lg px-3 py-2 bg-background text-foreground border-border disabled:opacity-50 min-w-[120px]"
+          >
+                  <option value="polygon">Polygon</option>
+                  <option value="single-box">Single Box</option>
+                  <option value="dual-box">Dual Box</option>
+                </select>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-foreground">Color:</span>
+                <input
+                  type="color"
+                  value={drawingColor}
+                  onChange={(e) => setDrawingColor(e.target.value)}
+                  disabled={isLoading || !grid.length}
+                  className="w-8 h-8 border border-border rounded cursor-pointer disabled:opacity-50"
+                  title="Select drawing color"
+                />
+              </div>
+              
+              <Button 
+                onClick={() => {
+                  if (measurementMode === 'polygon') {
+                    toggleDrawing();
+                  } else {
+                    setIsDrawingBox(!isDrawingBox);
+                    if (!isDrawingBox) {
+                      setBox1(null);
+                      setBox2(null);
+                      setCurrentBox(1);
+                    }
+                  }
+                }}
+                variant={isDrawing || isDrawingBox ? "destructive" : "default"}
+                disabled={isLoading || !grid.length}
+                className="px-4 py-2"
+              >
+                {measurementMode === 'polygon' 
+                  ? (isDrawing ? "Stop Drawing" : "Draw Polygon")
+                  : (isDrawingBox ? "Stop Drawing" : "Draw Box")
+                }
+              </Button>
+              <Button 
+                onClick={() => {
+                  setPolygonPoints([]);
+                  setBox1(null);
+                  setBox2(null);
+                  setDeltaT(null);
+                  setIsDrawing(false);
+                  setIsDrawingBox(false);
+                  setCurrentBox(1);
+                  setTempBox(null);
+                  setMousePos(null);
+                  setTempMarkers([]);
+                }}
+                variant="outline"
+                disabled={isLoading}
+                className="px-4 py-2"
+              >
+                Clear
+              </Button>
+            </div>
+            
+            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+              {isLoading && <div className="flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>Processing...</div>}
+              {rows && cols && <div>Resolution: {cols}×{rows}</div>}
+            </div>
+          </div>
+          
+          {/* Status Messages */}
+          <div className="mt-3 space-y-1">
+            {isDrawing && measurementMode === 'polygon' && <div className="text-sm text-primary font-medium flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full"></div>Left-click to add points, Right-click to complete polygon</div>}
+            {isDrawingBox && measurementMode === 'single-box' && !tempBox && <div className="text-sm text-primary font-medium flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full"></div>Click to start drawing measurement box</div>}
+            {isDrawingBox && measurementMode === 'single-box' && tempBox && <div className="text-sm text-primary font-medium flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full"></div>Click to complete measurement box</div>}
+            {isDrawingBox && measurementMode === 'dual-box' && currentBox === 1 && !tempBox && <div className="text-sm text-primary font-medium flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full"></div>Click to start drawing Box 1</div>}
+            {isDrawingBox && measurementMode === 'dual-box' && currentBox === 1 && tempBox && <div className="text-sm text-primary font-medium flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full"></div>Click to complete Box 1</div>}
+            {isDrawingBox && measurementMode === 'dual-box' && currentBox === 2 && !tempBox && <div className="text-sm text-primary font-medium flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full"></div>Click to start drawing Box 2</div>}
+            {isDrawingBox && measurementMode === 'dual-box' && currentBox === 2 && tempBox && <div className="text-sm text-primary font-medium flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full"></div>Click to complete Box 2</div>}
+            {!isDrawing && !isDrawingBox && polygonPoints.length >= 3 && measurementMode === 'polygon' && <div className="text-sm text-green-600 font-medium flex items-center gap-2"><div className="w-2 h-2 bg-green-600 rounded-full"></div>✓ Polygon completed - Delta T calculated</div>}
+            {!isDrawingBox && box1 && measurementMode === 'single-box' && <div className="text-sm text-green-600 font-medium flex items-center gap-2"><div className="w-2 h-2 bg-green-600 rounded-full"></div>✓ Single box completed - Delta T calculated</div>}
+            {!isDrawingBox && box1 && box2 && measurementMode === 'dual-box' && <div className="text-sm text-green-600 font-medium flex items-center gap-2"><div className="w-2 h-2 bg-green-600 rounded-full"></div>✓ Dual boxes completed - Delta T calculated</div>}
+          </div>
+        </div>
+        
+        {/* Main Content */}
+        <div className="p-6">
+          
+          {error && (
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+              <div className="text-destructive font-medium">Error</div>
+              <div className="text-destructive/80 text-sm mt-1">{error}</div>
+            </div>
+          )}
+
+          {deltaT && (
+            <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
+              <div className="text-primary font-medium mb-2">Delta T Analysis</div>
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  <div className="text-muted-foreground">Min Temperature</div>
+                  <div className="font-mono text-lg">{deltaT.min.toFixed(2)}°C</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Max Temperature</div>
+                  <div className="font-mono text-lg">{deltaT.max.toFixed(2)}°C</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Delta T</div>
+                  <div className="font-mono text-lg font-bold text-primary">{deltaT.delta.toFixed(2)}°C</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-6 items-start">
+            <div className="flex flex-col">
+              <div className="relative inline-block">
+                <canvas 
+                  ref={canvasRef} 
+                  style={{
+                    imageRendering: "pixelated", 
+                    width: "400px",
+                    height: "300px"
+                  }} 
+                  className={`border rounded border-border ${isDrawing ? 'cursor-crosshair' : 'cursor-crosshair'}`}
+                  onMouseMove={handleMouseMove}
+                  onMouseLeave={handleMouseLeave}
+                  onMouseDown={handleCanvasClick}
+                  onContextMenu={(e) => e.preventDefault()}
+                />
+                {hoverInfo && (
+                  <>
+                    {/* Professional crosshair indicator */}
+                    <div className="absolute pointer-events-none z-20">
+                      <div 
+                        className="absolute w-4 h-0.5 bg-white/80"
+                        style={{
+                          left: `${(hoverInfo.x / cols) * 400 - 8}px`,
+                          top: `${(hoverInfo.y / rows) * 300}px`
+                        }}
+                      />
+                      <div 
+                        className="absolute w-0.5 h-4 bg-white/80"
+                        style={{
+                          left: `${(hoverInfo.x / cols) * 400}px`,
+                          top: `${(hoverInfo.y / rows) * 300 - 8}px`
+                        }}
+                      />
+                      <div 
+                        className="absolute w-2 h-2 border-2 border-white rounded-full"
+                        style={{
+                          left: `${(hoverInfo.x / cols) * 400 - 4}px`,
+                          top: `${(hoverInfo.y / rows) * 300 - 4}px`
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+              
+              {/* Fixed Measurement Panel at Bottom */}
+              <div className="mt-3 bg-white border border-border rounded-lg p-3 shadow-sm w-full">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full"></div>
+                    <span className="text-xs font-semibold text-foreground">Live Measurement</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">Hover to measure</div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-gray-50 rounded-md p-2 border border-gray-200">
+                    <div className="flex items-center gap-1 mb-1">
+                      <div className="w-1 h-1 bg-blue-500 rounded-full"></div>
+                      <span className="text-xs font-medium text-blue-700">Position</span>
+                    </div>
+                  <div className="text-sm font-bold text-gray-900 font-mono">
+                    {hoverInfo ? `(${hoverInfo.x}, ${hoverInfo.y})` : '(0, 0)'}
+                  </div>
+                </div>
+                <div className="bg-gray-50 rounded-md p-2 border border-gray-200">
+                  <div className="flex items-center gap-1 mb-1">
+                    <div className="w-1 h-1 bg-red-500 rounded-full"></div>
+                    <span className="text-xs font-medium text-red-700">Temperature</span>
+                  </div>
+                  <div className="text-sm font-bold text-gray-900 font-mono">
+                    {hoverInfo ? `${hoverInfo.temperature.toFixed(2)}°C` : '0.00°C'}
+                  </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Temperature Legend */}
+          {temperatureRange && (
+            <div className="bg-white border border-border rounded-lg p-3 shadow-sm">
+              <div className="text-xs font-medium text-foreground mb-2">Temperature Scale</div>
+              <div className="flex flex-col items-center space-y-1">
+                <div className="text-xs text-muted-foreground font-mono">
+                  {temperatureRange.max.toFixed(1)}°C
+                </div>
+                <div 
+                  className="w-6 h-24 rounded border border-border"
+                  style={{
+                    background: `linear-gradient(to bottom, 
+                      rgb(${palettes[palette](1).join(',')}), 
+                      rgb(${palettes[palette](0.8).join(',')}), 
+                      rgb(${palettes[palette](0.6).join(',')}), 
+                      rgb(${palettes[palette](0.4).join(',')}), 
+                      rgb(${palettes[palette](0.2).join(',')}), 
+                      rgb(${palettes[palette](0).join(',')}))`
+                  }}
+                />
+                <div className="text-xs text-muted-foreground font-mono">
+                  {temperatureRange.min.toFixed(1)}°C
+                </div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {palette}
+                </div>
+              </div>
+            </div>
+          )}
+          </div>
+        </div>
+      </>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-violet-50 to-indigo-50">
       <div className="container mx-auto p-6">
@@ -724,153 +1306,10 @@ export default function ThermalViewer() {
         </div>
         
         <div className="bg-white rounded-xl shadow-lg border border-border overflow-hidden">
-          {/* Controls Header */}
-          <div className="bg-gray-50 px-6 py-4 border-b border-border">
-            <div className="flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Upload className="w-4 h-4 text-muted-foreground" />
-                <input 
-                  type="file" 
-                  accept=".csv" 
-                  onChange={(e)=>{
-                    const f = e.target.files?.[0];
-                    if (f) handleFile(f);
-                  }} 
-                  disabled={isLoading}
-                  className="file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/80 disabled:opacity-50"
-                />
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Palette className="w-4 h-4 text-muted-foreground" />
-                <select 
-                  value={palette} 
-                  onChange={(e)=>setPalette(e.target.value as any)} 
-                  disabled={isLoading}
-                  className="border rounded-lg px-3 py-2 bg-background text-foreground border-border disabled:opacity-50 min-w-[140px]"
-                >
-                  {Object.keys(palettes).map(k => <option key={k} value={k}>{k}</option>)}
-                </select>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <Button 
-                  onClick={toggleDrawing}
-                  variant={isDrawing ? "destructive" : "default"}
-                  disabled={isLoading || !grid.length}
-                  className="px-4 py-2"
-                >
-                  {isDrawing ? "Stop Drawing" : "Draw Polygon"}
-                </Button>
-                <Button 
-                  onClick={clearPolygon}
-                  variant="outline"
-                  disabled={isLoading || polygonPoints.length === 0}
-                  className="px-4 py-2"
-                >
-                  Clear
-                </Button>
-              </div>
-              
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                {isLoading && <div className="flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>Processing...</div>}
-                {rows && cols && <div>Resolution: {cols}×{rows}</div>}
-              </div>
-            </div>
-            
-            {/* Status Messages */}
-            <div className="mt-3 space-y-1">
-              {isDrawing && <div className="text-sm text-primary font-medium flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full"></div>Left-click to add points, Right-click to complete polygon</div>}
-              {!isDrawing && polygonPoints.length >= 3 && <div className="text-sm text-green-600 font-medium flex items-center gap-2"><div className="w-2 h-2 bg-green-600 rounded-full"></div>✓ Polygon completed - Delta T calculated</div>}
-            </div>
-          </div>
-          
-          {/* Main Content */}
-          <div className="p-6">
-            
-            {error && (
-              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
-                <div className="text-destructive font-medium">Error</div>
-                <div className="text-destructive/80 text-sm mt-1">{error}</div>
-              </div>
-            )}
-
-            {deltaT && (
-              <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
-                <div className="text-primary font-medium mb-2">Delta T Analysis</div>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <div className="text-muted-foreground">Min Temperature</div>
-                    <div className="font-mono text-lg">{deltaT.min.toFixed(2)}°C</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Max Temperature</div>
-                    <div className="font-mono text-lg">{deltaT.max.toFixed(2)}°C</div>
-                  </div>
-                  <div>
-                    <div className="text-muted-foreground">Delta T</div>
-                    <div className="font-mono text-lg font-bold text-primary">{deltaT.delta.toFixed(2)}°C</div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="flex gap-6 items-start">
-              <div className="relative inline-block">
-                <canvas 
-                  ref={canvasRef} 
-                  style={{
-                    imageRendering: "pixelated", 
-                    width: "400px",
-                    height: "300px"
-                  }} 
-                  className={`border rounded border-border ${isDrawing ? 'cursor-crosshair' : 'cursor-crosshair'}`}
-                  onMouseMove={handleMouseMove}
-                  onMouseLeave={handleMouseLeave}
-                  onMouseDown={handleCanvasClick}
-                  onContextMenu={(e) => e.preventDefault()}
-                />
-                {hoverInfo && (
-                  <div className="absolute top-2 left-2 bg-black/80 text-white px-3 py-2 rounded-lg text-sm font-mono pointer-events-none z-10">
-                    <div>Position: ({hoverInfo.x}, {hoverInfo.y})</div>
-                    <div>Temperature: {hoverInfo.temperature.toFixed(2)}°C</div>
-                  </div>
-                )}
-              </div>
-              
-              {/* Temperature Legend */}
-              {temperatureRange && (
-                <div className="bg-white border border-border rounded-lg p-3 shadow-sm">
-                  <div className="text-xs font-medium text-foreground mb-2">Temperature Scale</div>
-                  <div className="flex flex-col items-center space-y-1">
-                    <div className="text-xs text-muted-foreground font-mono">
-                      {temperatureRange.max.toFixed(1)}°C
-                    </div>
-                    <div 
-                      className="w-6 h-24 rounded border border-border"
-                      style={{
-                        background: `linear-gradient(to bottom, 
-                          rgb(${palettes[palette](1).join(',')}), 
-                          rgb(${palettes[palette](0.8).join(',')}), 
-                          rgb(${palettes[palette](0.6).join(',')}), 
-                          rgb(${palettes[palette](0.4).join(',')}), 
-                          rgb(${palettes[palette](0.2).join(',')}), 
-                          rgb(${palettes[palette](0).join(',')}))`
-                      }}
-                    />
-                    <div className="text-xs text-muted-foreground font-mono">
-                      {temperatureRange.min.toFixed(1)}°C
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">
-                      {palette}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          {renderContent()}
         </div>
       </div>
     </div>
   );
 }
+
