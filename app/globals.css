@@ -4,8 +4,8 @@
 
 :root {
   --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+  --background-start-rgb: 221, 214, 254;
+  --background-end-rgb: 250, 245, 255;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -18,11 +18,11 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
+    --background: 270 20% 98%;
     --foreground: 270 5% 10%;
-    --card: 0 0% 100%;
+    --card: 270 15% 95%;
     --card-foreground: 270 5% 10%;
-    --popover: 0 0% 100%;
+    --popover: 270 15% 95%;
     --popover-foreground: 270 5% 10%;
     --primary: 270 95% 53%;
     --primary-foreground: 0 0% 98%;

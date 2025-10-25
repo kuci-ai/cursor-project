@@ -388,7 +388,7 @@ export default function ThermalViewer() {
   }, [grid, palette, rows, cols]);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-violet-50 to-indigo-50">
       <div className="container mx-auto p-6">
         <div className="mb-6">
           <Link href="/">

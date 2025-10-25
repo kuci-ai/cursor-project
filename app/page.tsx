@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-violet-50 to-indigo-50">
         <div className="container mx-auto p-6">
           <div className="mb-6">
             <h1 className="text-3xl font-bold text-foreground mb-2">Image Processing Tools</h1>
