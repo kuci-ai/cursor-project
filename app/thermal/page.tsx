@@ -75,11 +75,29 @@ const palettes = {
     const b = Math.floor((1 - v) * 255);
     return [r, g, b];
   },
-  "High Contrast": (v: number): [number, number, number] => {
+  "Inferno": (v: number): [number, number, number] => {
     v = clamp01(v);
-    // High contrast black and white
-    const intensity = v > 0.5 ? 255 : 0;
-    return [intensity, intensity, intensity];
+    // Inferno colormap: black -> purple -> red -> orange -> yellow -> white
+    if (v < 0.25) {
+      // Black to purple
+      const t = v / 0.25;
+      return [Math.floor(4 * t), 0, Math.floor(4 * t)];
+    } else if (v < 0.5) {
+      // Purple to red
+      const t = (v - 0.25) / 0.25;
+      return [Math.floor(4 + 252 * t), 0, Math.floor(4 - 4 * t)];
+    } else if (v < 0.75) {
+      // Red to orange
+      const t = (v - 0.5) / 0.25;
+      return [255, Math.floor(4 * t), 0];
+    } else {
+      // Orange to yellow to white
+      const t = (v - 0.75) / 0.25;
+      const r = Math.floor(255 - 255 * t);
+      const g = Math.floor(4 + 251 * t);
+      const b = Math.floor(4 * t);
+      return [r, g, b];
+    }
   }
 };
 
