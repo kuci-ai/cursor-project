@@ -359,7 +359,7 @@ export default function ThermalViewer() {
   const [tempBox, setTempBox] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
   const [mousePos, setMousePos] = useState<{x: number, y: number} | null>(null);
   const [tempMarkers, setTempMarkers] = useState<{x: number, y: number, temp: number, type: 'min' | 'max'}[]>([]);
-  const [drawingColor, setDrawingColor] = useState('#ff0000');
+  const [drawingColor, setDrawingColor] = useState('#ffffff');
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   function handleFile(file: File) {
@@ -429,8 +429,8 @@ export default function ThermalViewer() {
     if (!ctx) return;
 
     // Set canvas dimensions to match display size
-    const W = 400;
-    const H = 300;
+    const W = 500;
+    const H = 375;
     canvas.width = W;
     canvas.height = H;
 
@@ -581,27 +581,60 @@ export default function ThermalViewer() {
       const canvasX = (marker.x / cols) * W;
       const canvasY = (marker.y / rows) * H;
       
-      // Draw marker circle
-      ctx.fillStyle = marker.type === 'max' ? '#ff0000' : '#0000ff';
-      ctx.beginPath();
-      ctx.arc(canvasX, canvasY, 8, 0, 2 * Math.PI);
-      ctx.fill();
+      // Professional T-shape marker with color coding
+      const markerSize = 8;
+      const lineWidth = 3;
+      const markerColor = marker.type === 'max' ? '#dc2626' : '#2563eb'; // Red for max, blue for min
       
-      // Draw white border
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
+      ctx.save();
+      ctx.strokeStyle = markerColor;
+      ctx.fillStyle = '#ffffff';
+      ctx.lineWidth = lineWidth;
+      
+      // Draw T-shape marker
+      // Vertical line
+      ctx.beginPath();
+      ctx.moveTo(canvasX, canvasY - markerSize);
+      ctx.lineTo(canvasX, canvasY + markerSize);
       ctx.stroke();
       
-      // Draw marker label
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 10px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText(marker.type.toUpperCase(), canvasX, canvasY - 12);
+      // Horizontal line
+      ctx.beginPath();
+      ctx.moveTo(canvasX - markerSize, canvasY);
+      ctx.lineTo(canvasX + markerSize, canvasY);
+      ctx.stroke();
       
-      // Draw temperature value
-      ctx.fillStyle = marker.type === 'max' ? '#ff0000' : '#0000ff';
+      // Draw center dot
+      ctx.beginPath();
+      ctx.arc(canvasX, canvasY, 2, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.stroke();
+      
+      // Draw temperature value only
+      const tempText = `${marker.temp.toFixed(1)}°C`;
+      
+      // Calculate text dimensions
       ctx.font = 'bold 8px Arial';
-      ctx.fillText(`${marker.temp.toFixed(1)}°C`, canvasX, canvasY + 20);
+      const tempMetrics = ctx.measureText(tempText);
+      const textWidth = tempMetrics.width;
+      const textHeight = 10;
+      
+      // Draw semi-transparent white background rectangle
+      const rectX = canvasX - (textWidth / 2) - 3;
+      const rectY = canvasY + markerSize + 4;
+      const rectWidth = textWidth + 6;
+      
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.fillRect(rectX, rectY, rectWidth, textHeight + 2);
+      
+      // Draw temperature text in black
+      ctx.fillStyle = '#000000';
+      ctx.font = 'bold 8px Arial';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(tempText, canvasX, rectY + 1);
+      
+      ctx.restore();
     });
   }, [grid, palette, rows, cols, polygonPoints, isDrawing, box1, box2, tempBox, currentBox, mousePos, tempMarkers, drawingColor]);
 
@@ -660,10 +693,12 @@ export default function ThermalViewer() {
     if (isDrawing && polygonPoints.length > 0) {
       const ctx = canvas.getContext("2d");
       if (ctx) {
+        // Define canvas dimensions
+        const W = 500;
+        const H = 375;
+        
         // Redraw the thermal image first using the same method as main draw
         if (grid.length > 0) {
-          const W = 400;
-          const H = 300;
           const img = ctx.createImageData(W, H);
           
           // Use the same thermal rendering logic as the main draw function
@@ -696,8 +731,8 @@ export default function ThermalViewer() {
           ctx.beginPath();
           
           polygonPoints.forEach((point, index) => {
-            const canvasX = (point.x / cols) * 400;
-            const canvasY = (point.y / rows) * 300;
+            const canvasX = (point.x / cols) * W;
+            const canvasY = (point.y / rows) * H;
             if (index === 0) {
               ctx.moveTo(canvasX, canvasY);
             } else {
@@ -709,8 +744,8 @@ export default function ThermalViewer() {
           // Draw existing points
           ctx.fillStyle = drawingColor;
           polygonPoints.forEach(point => {
-            const canvasX = (point.x / cols) * 400;
-            const canvasY = (point.y / rows) * 300;
+            const canvasX = (point.x / cols) * W;
+            const canvasY = (point.y / rows) * H;
             ctx.beginPath();
             ctx.arc(canvasX, canvasY, 4, 0, 2 * Math.PI);
             ctx.fill();
@@ -719,10 +754,10 @@ export default function ThermalViewer() {
         
         // Draw preview line to current mouse position
         const lastPoint = polygonPoints[polygonPoints.length - 1];
-        const lastCanvasX = (lastPoint.x / cols) * 400;
-        const lastCanvasY = (lastPoint.y / rows) * 300;
-        const currentCanvasX = (gridX / cols) * 400;
-        const currentCanvasY = (gridY / rows) * 300;
+        const lastCanvasX = (lastPoint.x / cols) * W;
+        const lastCanvasY = (lastPoint.y / rows) * H;
+        const currentCanvasX = (gridX / cols) * W;
+        const currentCanvasY = (gridY / rows) * H;
         
         ctx.strokeStyle = drawingColor;
         ctx.lineWidth = 2;
@@ -1056,6 +1091,8 @@ export default function ThermalViewer() {
               setBox2(null);
               setDeltaT(null);
               setTempMarkers([]);
+              setTempBox(null);
+              setMousePos(null);
             }}
             disabled={isLoading || !grid.length}
             className="border rounded-lg px-3 py-2 bg-background text-foreground border-border disabled:opacity-50 min-w-[120px]"
@@ -1081,8 +1118,18 @@ export default function ThermalViewer() {
               <Button 
                 onClick={() => {
                   if (measurementMode === 'polygon') {
+                    // Clear any existing boxes when starting polygon drawing
+                    setBox1(null);
+                    setBox2(null);
+                    setTempBox(null);
+                    setTempMarkers([]);
+                    setDeltaT(null);
                     toggleDrawing();
                   } else {
+                    // Clear any existing polygon when starting box drawing
+                    setPolygonPoints([]);
+                    setTempMarkers([]);
+                    setDeltaT(null);
                     setIsDrawingBox(!isDrawingBox);
                     if (!isDrawingBox) {
                       setBox1(null);
@@ -1179,8 +1226,8 @@ export default function ThermalViewer() {
                   ref={canvasRef} 
                   style={{
                     imageRendering: "pixelated", 
-                    width: "400px",
-                    height: "300px"
+                    width: "500px",
+                    height: "375px"
                   }} 
                   className={`border rounded border-border ${isDrawing ? 'cursor-crosshair' : 'cursor-crosshair'}`}
                   onMouseMove={handleMouseMove}
@@ -1195,22 +1242,22 @@ export default function ThermalViewer() {
                       <div 
                         className="absolute w-4 h-0.5 bg-white/80"
                         style={{
-                          left: `${(hoverInfo.x / cols) * 400 - 8}px`,
-                          top: `${(hoverInfo.y / rows) * 300}px`
+                          left: `${(hoverInfo.x / cols) * 500 - 8}px`,
+                          top: `${(hoverInfo.y / rows) * 375}px`
                         }}
                       />
                       <div 
                         className="absolute w-0.5 h-4 bg-white/80"
                         style={{
-                          left: `${(hoverInfo.x / cols) * 400}px`,
-                          top: `${(hoverInfo.y / rows) * 300 - 8}px`
+                          left: `${(hoverInfo.x / cols) * 500}px`,
+                          top: `${(hoverInfo.y / rows) * 375 - 8}px`
                         }}
                       />
                       <div 
                         className="absolute w-2 h-2 border-2 border-white rounded-full"
                         style={{
-                          left: `${(hoverInfo.x / cols) * 400 - 4}px`,
-                          top: `${(hoverInfo.y / rows) * 300 - 4}px`
+                          left: `${(hoverInfo.x / cols) * 500 - 4}px`,
+                          top: `${(hoverInfo.y / rows) * 375 - 4}px`
                         }}
                       />
                     </div>
@@ -1254,12 +1301,22 @@ export default function ThermalViewer() {
           {temperatureRange && (
             <div className="bg-white border border-border rounded-lg p-3 shadow-sm">
               <div className="text-xs font-medium text-foreground mb-2">Temperature Scale</div>
-              <div className="flex flex-col items-center space-y-1">
-                <div className="text-xs text-muted-foreground font-mono">
-                  {temperatureRange.max.toFixed(1)}°C
+              <div className="flex items-start gap-2">
+                {/* Temperature values aligned with gradient */}
+                <div className="flex flex-col justify-between h-72 text-xs text-muted-foreground font-mono">
+                  {[1, 0.75, 0.5, 0.25, 0].map((ratio, index) => {
+                    const temp = temperatureRange.min + (temperatureRange.max - temperatureRange.min) * ratio;
+                    return (
+                      <div key={index} className="text-right">
+                        {temp.toFixed(1)}°C
+                      </div>
+                    );
+                  })}
                 </div>
+                
+                {/* Gradient bar */}
                 <div 
-                  className="w-6 h-24 rounded border border-border"
+                  className="w-6 h-72 rounded border border-border relative"
                   style={{
                     background: `linear-gradient(to bottom, 
                       rgb(${palettes[palette](1).join(',')}), 
@@ -1269,13 +1326,26 @@ export default function ThermalViewer() {
                       rgb(${palettes[palette](0.2).join(',')}), 
                       rgb(${palettes[palette](0).join(',')}))`
                   }}
-                />
-                <div className="text-xs text-muted-foreground font-mono">
-                  {temperatureRange.min.toFixed(1)}°C
+                >
+                  {/* Scale markers */}
+                  {[0, 0.25, 0.5, 0.75, 1].map((ratio, index) => {
+                    return (
+                      <div
+                        key={index}
+                        className="absolute w-1 h-0.5 bg-white border border-gray-400"
+                        style={{
+                          left: '-2px',
+                          top: `${ratio * 100}%`,
+                          transform: 'translateY(-50%)'
+                        }}
+                      />
+                    );
+                  })}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {palette}
-                </div>
+              </div>
+              
+              <div className="text-xs text-muted-foreground mt-2 text-center">
+                {palette}
               </div>
             </div>
           )}
