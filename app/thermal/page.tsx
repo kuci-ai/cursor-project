@@ -297,6 +297,7 @@ export default function ThermalViewer() {
   const [palette, setPalette] = useState<keyof typeof palettes>("Jet");
   const [error, setError] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
+  const [hoverInfo, setHoverInfo] = useState<{x: number, y: number, temperature: number} | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   function handleFile(file: File) {
@@ -387,6 +388,41 @@ export default function ThermalViewer() {
     ctx.putImageData(img, 0, 0);
   }, [grid, palette, rows, cols]);
 
+  // Handle mouse hover to show temperature
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!grid.length || !canvasRef.current || rows === 0 || cols === 0) {
+      setHoverInfo(null);
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = Math.floor((e.clientX - rect.left) * scaleX);
+    const y = Math.floor((e.clientY - rect.top) * scaleY);
+    
+    // Convert canvas coordinates to grid coordinates
+    const gridX = Math.floor((x / canvas.width) * cols);
+    const gridY = Math.floor((y / canvas.height) * rows);
+    
+    if (gridY >= 0 && gridY < rows && gridX >= 0 && gridX < cols) {
+      const temperature = grid[gridY][gridX];
+      setHoverInfo({
+        x: gridX,
+        y: gridY,
+        temperature: temperature
+      });
+    } else {
+      setHoverInfo(null);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setHoverInfo(null);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-violet-50 to-indigo-50">
       <div className="container mx-auto p-6">
@@ -432,15 +468,25 @@ export default function ThermalViewer() {
               </div>
             )}
 
-            <canvas 
-              ref={canvasRef} 
-              style={{
-                imageRendering: "pixelated", 
-                width: cols > 0 ? Math.min(960, cols * 1.5) : undefined, 
-                height: rows > 0 ? Math.min(720, rows * 1.5) : undefined
-              }} 
-              className="border rounded border-border" 
-            />
+            <div className="relative inline-block">
+              <canvas 
+                ref={canvasRef} 
+                style={{
+                  imageRendering: "pixelated", 
+                  width: cols > 0 ? Math.min(960, cols * 1.5) : undefined, 
+                  height: rows > 0 ? Math.min(720, rows * 1.5) : undefined
+                }} 
+                className="border rounded border-border cursor-crosshair" 
+                onMouseMove={handleMouseMove}
+                onMouseLeave={handleMouseLeave}
+              />
+              {hoverInfo && (
+                <div className="absolute top-2 left-2 bg-black/80 text-white px-3 py-2 rounded-lg text-sm font-mono pointer-events-none z-10">
+                  <div>Position: ({hoverInfo.x}, {hoverInfo.y})</div>
+                  <div>Temperature: {hoverInfo.temperature.toFixed(2)}°C</div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
