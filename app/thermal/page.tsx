@@ -360,6 +360,17 @@ export default function ThermalViewer() {
   const [mousePos, setMousePos] = useState<{x: number, y: number} | null>(null);
   const [tempMarkers, setTempMarkers] = useState<{x: number, y: number, temp: number, type: 'min' | 'max'}[]>([]);
   const [drawingColor, setDrawingColor] = useState('#ffffff');
+  const [analysisResults, setAnalysisResults] = useState<{
+    id: string;
+    type: 'polygon' | 'single-box' | 'dual-box';
+    deltaT: number;
+    minTemp: number;
+    maxTemp: number;
+    timestamp: Date;
+    description: string;
+  }[]>([]);
+  const [isAnalysisMode, setIsAnalysisMode] = useState(false);
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   function handleFile(file: File) {
@@ -399,6 +410,21 @@ export default function ThermalViewer() {
           setRows(parsed.rows);
           setCols(parsed.cols);
           setError("");
+          
+          // Clear any existing analysis and measurements when new file is loaded
+          setPolygonPoints([]);
+          setBox1(null);
+          setBox2(null);
+          setDeltaT(null);
+          setTempMarkers([]);
+          setIsDrawing(false);
+          setIsDrawingBox(false);
+          setCurrentBox(1);
+          setTempBox(null);
+          setMousePos(null);
+          setAnalysisResults([]);
+          setSelectedAnalysisId(null);
+          setIsAnalysisMode(false);
         }
       } catch (err) {
         console.error("Processing error:", err);
@@ -637,6 +663,81 @@ export default function ThermalViewer() {
       ctx.restore();
     });
   }, [grid, palette, rows, cols, polygonPoints, isDrawing, box1, box2, tempBox, currentBox, mousePos, tempMarkers, drawingColor]);
+
+  // Add current measurement to analysis
+  const addToAnalysis = () => {
+    if (!deltaT) return;
+    
+    const newAnalysis = {
+      id: `analysis_${Date.now()}`,
+      type: measurementMode,
+      deltaT: deltaT.delta,
+      minTemp: deltaT.min,
+      maxTemp: deltaT.max,
+      timestamp: new Date(),
+      description: `${measurementMode === 'polygon' ? 'Polygon' : measurementMode === 'single-box' ? 'Single Box' : 'Dual Box'} Analysis #${analysisResults.length + 1}`
+    };
+    
+    setAnalysisResults(prev => [...prev, newAnalysis]);
+    
+    // Clear current measurement
+    setPolygonPoints([]);
+    setBox1(null);
+    setBox2(null);
+    setDeltaT(null);
+    setTempMarkers([]);
+    setIsDrawing(false);
+    setIsDrawingBox(false);
+    setCurrentBox(1);
+    setTempBox(null);
+  };
+
+  // Submit final analysis
+  const submitAnalysis = () => {
+    if (!selectedAnalysisId) {
+      setError("Please select one analysis result to submit.");
+      return;
+    }
+    
+    const selectedResult = analysisResults.find(r => r.id === selectedAnalysisId);
+    if (!selectedResult) {
+      setError("Selected analysis result not found.");
+      return;
+    }
+    
+    const analysisSummary = {
+      selectedMeasurement: selectedResult,
+      totalMeasurements: analysisResults.length,
+      timestamp: new Date()
+    };
+    
+    // Here you would typically send to a server or save to database
+    console.log('Selected Analysis Summary:', analysisSummary);
+    
+    // Show success message
+    setError("");
+    alert(`Selected Analysis Submitted!\n\nMeasurement: ${selectedResult.description}\nType: ${selectedResult.type === 'polygon' ? 'Polygon' : selectedResult.type === 'single-box' ? 'Single Box' : 'Dual Box'}\nDelta T: ${selectedResult.deltaT.toFixed(2)}°C\nTemperature Range: ${selectedResult.minTemp.toFixed(1)}°C - ${selectedResult.maxTemp.toFixed(1)}°C`);
+    
+    // Reset analysis
+    setAnalysisResults([]);
+    setSelectedAnalysisId(null);
+    setIsAnalysisMode(false);
+  };
+
+  // Clear all analysis
+  const clearAnalysis = () => {
+    setAnalysisResults([]);
+    setSelectedAnalysisId(null);
+    setPolygonPoints([]);
+    setBox1(null);
+    setBox2(null);
+    setDeltaT(null);
+    setTempMarkers([]);
+    setIsDrawing(false);
+    setIsDrawingBox(false);
+    setCurrentBox(1);
+    setTempBox(null);
+  };
 
   // Auto-calculate delta T when boxes are completed
   useEffect(() => {
@@ -1048,129 +1149,212 @@ export default function ThermalViewer() {
     return (
       <>
         {/* Controls Header */}
-        <div className="bg-gray-50 px-6 py-4 border-b border-border">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Upload className="w-4 h-4 text-muted-foreground" />
-            <input 
-              type="file" 
-              accept=".csv" 
-              onChange={(e)=>{
-                const f = e.target.files?.[0];
-                if (f) handleFile(f);
-              }} 
-              disabled={isLoading}
-              className="text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 disabled:opacity-50"
-            />
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Palette className="w-4 h-4 text-muted-foreground" />
-            <select 
-              value={palette} 
-              onChange={(e)=>setPalette(e.target.value as any)} 
-              disabled={isLoading}
-                className="border rounded-lg px-3 py-2 bg-background text-foreground border-border disabled:opacity-50 min-w-[140px]"
-            >
-              {Object.keys(palettes).map(k => <option key={k} value={k}>{k}</option>)}
-            </select>
-            </div>
-            
-            <div className="flex items-center gap-2">
+        <div className="bg-gradient-to-r from-slate-50 to-gray-50 px-6 py-6 border-b border-border">
+          {/* File Upload Section */}
+          <div className="mb-6">
+            <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">Mode:</span>
-          <select 
-            value={measurementMode} 
-            onChange={(e) => {
-              const mode = e.target.value as 'polygon' | 'single-box' | 'dual-box';
-              setMeasurementMode(mode);
-              setIsDrawing(false);
-              setIsDrawingBox(false);
-              setPolygonPoints([]);
-              setBox1(null);
-              setBox2(null);
-              setDeltaT(null);
-              setTempMarkers([]);
-              setTempBox(null);
-              setMousePos(null);
-            }}
-            disabled={isLoading || !grid.length}
-            className="border rounded-lg px-3 py-2 bg-background text-foreground border-border disabled:opacity-50 min-w-[120px]"
-          >
-                  <option value="polygon">Polygon</option>
-                  <option value="single-box">Single Box</option>
-                  <option value="dual-box">Dual Box</option>
-                </select>
+                <Upload className="w-5 h-5 text-slate-600" />
+                <span className="text-sm font-semibold text-slate-700">Thermal Data</span>
               </div>
-              
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">Color:</span>
-                <input
-                  type="color"
-                  value={drawingColor}
-                  onChange={(e) => setDrawingColor(e.target.value)}
-                  disabled={isLoading || !grid.length}
-                  className="w-8 h-8 border border-border rounded cursor-pointer disabled:opacity-50"
-                  title="Select drawing color"
-                />
-              </div>
-              
-              <Button 
-                onClick={() => {
-                  if (measurementMode === 'polygon') {
-                    // Clear any existing boxes when starting polygon drawing
-                    setBox1(null);
-                    setBox2(null);
-                    setTempBox(null);
-                    setTempMarkers([]);
-                    setDeltaT(null);
-                    toggleDrawing();
-                  } else {
-                    // Clear any existing polygon when starting box drawing
-                    setPolygonPoints([]);
-                    setTempMarkers([]);
-                    setDeltaT(null);
-                    setIsDrawingBox(!isDrawingBox);
-                    if (!isDrawingBox) {
+              <input 
+                type="file" 
+                accept=".csv" 
+                onChange={(e)=>{
+                  const f = e.target.files?.[0];
+                  if (f) handleFile(f);
+                }} 
+                disabled={isLoading}
+                className="text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-primary file:text-primary-foreground hover:file:bg-primary/90 disabled:opacity-50"
+              />
+              {isLoading && (
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+                  Processing...
+                </div>
+              )}
+              {rows && cols && (
+                <div className="text-sm text-slate-600 font-medium">
+                  Resolution: {cols}×{rows}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Measurement Controls */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Settings Panel */}
+            <div className="bg-white rounded-lg border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                Measurement Settings
+              </h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Measurement Mode</label>
+                  <select 
+                    value={measurementMode} 
+                    onChange={(e) => {
+                      const mode = e.target.value as 'polygon' | 'single-box' | 'dual-box';
+                      setMeasurementMode(mode);
+                      setIsDrawing(false);
+                      setIsDrawingBox(false);
+                      setPolygonPoints([]);
                       setBox1(null);
                       setBox2(null);
-                      setCurrentBox(1);
-                    }
-                  }
-                }}
-                variant={isDrawing || isDrawingBox ? "destructive" : "default"}
-                disabled={isLoading || !grid.length}
-                className="px-4 py-2"
-              >
-                {measurementMode === 'polygon' 
-                  ? (isDrawing ? "Stop Drawing" : "Draw Polygon")
-                  : (isDrawingBox ? "Stop Drawing" : "Draw Box")
-                }
-              </Button>
-              <Button 
-                onClick={() => {
-                  setPolygonPoints([]);
-                  setBox1(null);
-                  setBox2(null);
-                  setDeltaT(null);
-                  setIsDrawing(false);
-                  setIsDrawingBox(false);
-                  setCurrentBox(1);
-                  setTempBox(null);
-                  setMousePos(null);
-                  setTempMarkers([]);
-                }}
-                variant="outline"
-                disabled={isLoading}
-                className="px-4 py-2"
-              >
-                Clear
-              </Button>
+                      setDeltaT(null);
+                      setTempMarkers([]);
+                      setTempBox(null);
+                      setMousePos(null);
+                    }}
+                    disabled={isLoading || !grid.length}
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white text-slate-700 border-slate-300 disabled:opacity-50 text-sm"
+                  >
+                    <option value="polygon">Polygon Analysis</option>
+                    <option value="single-box">Single Box Analysis</option>
+                    <option value="dual-box">Dual Box Analysis</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Color Palette</label>
+                  <div className="flex items-center gap-2">
+                    <Palette className="w-4 h-4 text-slate-500" />
+                    <select 
+                      value={palette} 
+                      onChange={(e)=>setPalette(e.target.value as any)} 
+                      disabled={isLoading}
+                      className="flex-1 border border-slate-300 rounded-lg px-3 py-2 bg-white text-slate-700 disabled:opacity-50 text-sm"
+                    >
+                      {Object.keys(palettes).map(k => <option key={k} value={k}>{k}</option>)}
+                    </select>
+                  </div>
+                </div>
+                
+                <div>
+                  <label className="text-xs font-medium text-slate-600 mb-1 block">Drawing Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={drawingColor}
+                      onChange={(e) => setDrawingColor(e.target.value)}
+                      disabled={isLoading || !grid.length}
+                      className="w-8 h-8 border border-slate-300 rounded cursor-pointer disabled:opacity-50"
+                      title="Select drawing color"
+                    />
+                    <span className="text-xs text-slate-500">Line color for drawings</span>
+                  </div>
+                </div>
+              </div>
             </div>
-            
-            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-              {isLoading && <div className="flex items-center gap-2"><div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>Processing...</div>}
-              {rows && cols && <div>Resolution: {cols}×{rows}</div>}
+
+            {/* Drawing Controls */}
+            <div className="bg-white rounded-lg border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                Drawing Controls
+              </h3>
+              <div className="space-y-3">
+                <Button 
+                  onClick={() => {
+                    if (measurementMode === 'polygon') {
+                      setBox1(null);
+                      setBox2(null);
+                      setTempBox(null);
+                      setTempMarkers([]);
+                      setDeltaT(null);
+                      toggleDrawing();
+                    } else {
+                      setPolygonPoints([]);
+                      setTempMarkers([]);
+                      setDeltaT(null);
+                      setIsDrawingBox(!isDrawingBox);
+                      if (!isDrawingBox) {
+                        setBox1(null);
+                        setBox2(null);
+                        setCurrentBox(1);
+                      }
+                    }
+                  }}
+                  variant={isDrawing || isDrawingBox ? "destructive" : "default"}
+                  disabled={isLoading || !grid.length}
+                  className="w-full h-10 font-medium"
+                >
+                  {measurementMode === 'polygon' 
+                    ? (isDrawing ? "Stop Drawing" : "Start Polygon")
+                    : (isDrawingBox ? "Stop Drawing" : "Start Box")
+                  }
+                </Button>
+                
+                <Button 
+                  onClick={() => {
+                    setPolygonPoints([]);
+                    setBox1(null);
+                    setBox2(null);
+                    setDeltaT(null);
+                    setIsDrawing(false);
+                    setIsDrawingBox(false);
+                    setCurrentBox(1);
+                    setTempBox(null);
+                    setMousePos(null);
+                    setTempMarkers([]);
+                  }}
+                  variant="outline"
+                  disabled={isLoading}
+                  className="w-full h-10 font-medium border-slate-300 text-slate-700 hover:bg-slate-50"
+                >
+                  Clear Current
+                </Button>
+              </div>
+            </div>
+
+            {/* Analysis Controls */}
+            <div className="bg-white rounded-lg border border-slate-200 p-4">
+              <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
+                Analysis Tools
+              </h3>
+              <div className="space-y-3">
+                <Button 
+                  onClick={() => setIsAnalysisMode(!isAnalysisMode)}
+                  variant={isAnalysisMode ? "default" : "outline"}
+                  disabled={isLoading}
+                  className="w-full h-10 font-medium"
+                >
+                  {isAnalysisMode ? "Exit Analysis Mode" : "Enter Analysis Mode"}
+                </Button>
+                
+                {isAnalysisMode && (
+                  <>
+                    <Button 
+                      onClick={addToAnalysis}
+                      variant="secondary"
+                      disabled={!deltaT || isLoading}
+                      className="w-full h-10 font-medium"
+                    >
+                      Add to Analysis
+                    </Button>
+                    
+                    <Button 
+                      onClick={submitAnalysis}
+                      variant="default"
+                      disabled={!selectedAnalysisId || isLoading}
+                      className="w-full h-10 font-medium"
+                    >
+                      Submit Selected Analysis
+                    </Button>
+                    
+                    <Button 
+                      onClick={clearAnalysis}
+                      variant="destructive"
+                      disabled={isLoading}
+                      className="w-full h-10 font-medium"
+                    >
+                      Clear All Analysis
+                    </Button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           
@@ -1201,7 +1385,7 @@ export default function ThermalViewer() {
 
           {deltaT && (
             <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
-              <div className="text-primary font-medium mb-2">Delta T Analysis</div>
+              <div className="text-primary font-medium mb-2">Current Delta T Analysis</div>
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
                   <div className="text-muted-foreground">Min Temperature</div>
@@ -1214,6 +1398,113 @@ export default function ThermalViewer() {
                 <div>
                   <div className="text-muted-foreground">Delta T</div>
                   <div className="font-mono text-lg font-bold text-primary">{deltaT.delta.toFixed(2)}°C</div>
+                </div>
+              </div>
+              {isAnalysisMode && (
+                <div className="mt-3 pt-3 border-t border-primary/20">
+                  <Button 
+                    onClick={addToAnalysis}
+                    variant="secondary"
+                    size="sm"
+                    className="w-full"
+                  >
+                    Add to Analysis Collection
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {isAnalysisMode && analysisResults.length > 0 && (
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+              <div className="text-green-800 font-medium mb-3">Analysis Collection ({analysisResults.length} measurements)</div>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {analysisResults.map((result, index) => {
+                  const maxDeltaT = Math.max(...analysisResults.map(r => r.deltaT));
+                  const isMaxDeltaT = result.deltaT === maxDeltaT;
+                  const isSelected = selectedAnalysisId === result.id;
+                  
+                  return (
+                    <div 
+                      key={result.id} 
+                      className={`flex items-center gap-3 rounded p-3 border cursor-pointer transition-all ${
+                        isSelected
+                          ? 'bg-red-100 border-red-400 border-2'
+                          : isMaxDeltaT 
+                            ? 'bg-yellow-100 border-yellow-400 border-2' 
+                            : 'bg-white border-gray-200 hover:bg-gray-50'
+                      }`}
+                      onClick={() => setSelectedAnalysisId(result.id)}
+                    >
+                      <input
+                        type="radio"
+                        name="analysisSelection"
+                        value={result.id}
+                        checked={isSelected}
+                        onChange={() => setSelectedAnalysisId(result.id)}
+                        className="w-4 h-4 text-blue-600"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm">
+                        <span className={`font-medium ${isSelected ? 'text-red-800' : isMaxDeltaT ? 'text-yellow-800' : 'text-gray-900'}`}>
+                          {result.description}
+                          {isMaxDeltaT && !isSelected && <span className="ml-2 text-xs bg-yellow-200 text-yellow-800 px-2 py-1 rounded-full">MAX</span>}
+                          {isSelected && <span className="ml-2 text-xs bg-red-200 text-red-800 px-2 py-1 rounded-full">SELECTED</span>}
+                        </span>
+                          <div className="text-muted-foreground">
+                            {result.type === 'polygon' ? 'Polygon' : result.type === 'single-box' ? 'Single Box' : 'Dual Box'} • 
+                            {result.minTemp.toFixed(1)}°C - {result.maxTemp.toFixed(1)}°C
+                          </div>
+                        </div>
+                      </div>
+                      <div className={`text-sm font-bold ${isSelected ? 'text-red-700' : isMaxDeltaT ? 'text-yellow-700' : 'text-green-700'}`}>
+                        ΔT: {result.deltaT.toFixed(2)}°C
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="mt-3 pt-3 border-t border-green-200">
+                {selectedAnalysisId ? (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                    <div className="text-red-800 font-medium mb-2">Selected Analysis</div>
+                    {(() => {
+                      const selected = analysisResults.find(r => r.id === selectedAnalysisId);
+                      return selected ? (
+                        <div className="text-sm">
+                          <div className="font-medium text-red-900">{selected.description}</div>
+                          <div className="text-red-700">
+                            {selected.type === 'polygon' ? 'Polygon' : selected.type === 'single-box' ? 'Single Box' : 'Dual Box'} • 
+                            ΔT: {selected.deltaT.toFixed(2)}°C • 
+                            Range: {selected.minTemp.toFixed(1)}°C - {selected.maxTemp.toFixed(1)}°C
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground text-sm py-2">
+                    Select one analysis result to submit
+                  </div>
+                )}
+                
+                <div className="grid grid-cols-3 gap-4 text-sm mt-3">
+                  <div>
+                    <div className="text-muted-foreground">Total Measurements</div>
+                    <div className="font-bold text-lg">{analysisResults.length}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Average Delta T</div>
+                    <div className="font-bold text-lg">
+                      {(analysisResults.reduce((sum, r) => sum + r.deltaT, 0) / analysisResults.length).toFixed(2)}°C
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Maximum Delta T</div>
+                    <div className="font-bold text-lg text-yellow-600">
+                      {Math.max(...analysisResults.map(r => r.deltaT)).toFixed(2)}°C
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
