@@ -298,6 +298,9 @@ export default function ThermalViewer() {
   const [error, setError] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [hoverInfo, setHoverInfo] = useState<{x: number, y: number, temperature: number} | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [polygonPoints, setPolygonPoints] = useState<{x: number, y: number}[]>([]);
+  const [deltaT, setDeltaT] = useState<{min: number, max: number, delta: number} | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   function handleFile(file: File) {
@@ -388,6 +391,74 @@ export default function ThermalViewer() {
     ctx.putImageData(img, 0, 0);
   }, [grid, palette, rows, cols]);
 
+  // Draw polygon overlay
+  useEffect(() => {
+    if (!canvasRef.current || polygonPoints.length === 0) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Clear previous overlay
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Redraw the thermal image
+    if (grid.length > 0) {
+      const W = canvas.width;
+      const H = canvas.height;
+      const img = ctx.createImageData(W, H);
+      const map = palettes[palette];
+      
+      let k = 0;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const gy = Math.floor((y / H) * rows);
+          const gx = Math.floor((x / W) * cols);
+          const v = grid[gy]?.[gx] ?? 0;
+          const [r, g, b] = map(v);
+          img.data[k++] = r;
+          img.data[k++] = g;
+          img.data[k++] = b;
+          img.data[k++] = 255;
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+
+    // Draw polygon
+    if (polygonPoints.length > 0) {
+      ctx.strokeStyle = '#ff0000';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      
+      polygonPoints.forEach((point, index) => {
+        const canvasX = (point.x / cols) * canvas.width;
+        const canvasY = (point.y / rows) * canvas.height;
+        
+        if (index === 0) {
+          ctx.moveTo(canvasX, canvasY);
+        } else {
+          ctx.lineTo(canvasX, canvasY);
+        }
+      });
+      
+      if (polygonPoints.length > 2) {
+        ctx.closePath();
+      }
+      ctx.stroke();
+      
+      // Draw points
+      ctx.fillStyle = '#ff0000';
+      polygonPoints.forEach(point => {
+        const canvasX = (point.x / cols) * canvas.width;
+        const canvasY = (point.y / rows) * canvas.height;
+        ctx.beginPath();
+        ctx.arc(canvasX, canvasY, 3, 0, 2 * Math.PI);
+        ctx.fill();
+      });
+    }
+  }, [grid, palette, rows, cols, polygonPoints]);
+
   // Handle mouse hover to show temperature
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!grid.length || !canvasRef.current || rows === 0 || cols === 0) {
@@ -421,6 +492,83 @@ export default function ThermalViewer() {
 
   const handleMouseLeave = () => {
     setHoverInfo(null);
+  };
+
+  // Point-in-polygon test using ray casting algorithm
+  const pointInPolygon = (point: {x: number, y: number}, polygon: {x: number, y: number}[]) => {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      if (((polygon[i].y > point.y) !== (polygon[j].y > point.y)) &&
+          (point.x < (polygon[j].x - polygon[i].x) * (point.y - polygon[i].y) / (polygon[j].y - polygon[i].y) + polygon[i].x)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
+  // Calculate delta T for polygon area
+  const calculateDeltaT = () => {
+    if (polygonPoints.length < 3 || !grid.length) return;
+
+    const temperatures: number[] = [];
+    
+    // Check each pixel in the grid
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        if (pointInPolygon({x, y}, polygonPoints)) {
+          temperatures.push(grid[y][x]);
+        }
+      }
+    }
+
+    if (temperatures.length > 0) {
+      const min = Math.min(...temperatures);
+      const max = Math.max(...temperatures);
+      const delta = max - min;
+      setDeltaT({min, max, delta});
+    }
+  };
+
+  // Handle polygon drawing
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !canvasRef.current || rows === 0 || cols === 0) return;
+
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = Math.floor((e.clientX - rect.left) * scaleX);
+    const y = Math.floor((e.clientY - rect.top) * scaleY);
+    
+    // Convert canvas coordinates to grid coordinates
+    const gridX = Math.floor((x / canvas.width) * cols);
+    const gridY = Math.floor((y / canvas.height) * rows);
+    
+    if (gridY >= 0 && gridY < rows && gridX >= 0 && gridX < cols) {
+      setPolygonPoints(prev => [...prev, {x: gridX, y: gridY}]);
+    }
+  };
+
+  // Start/stop polygon drawing
+  const toggleDrawing = () => {
+    if (isDrawing) {
+      setIsDrawing(false);
+      if (polygonPoints.length >= 3) {
+        calculateDeltaT();
+      }
+    } else {
+      setIsDrawing(true);
+      setPolygonPoints([]);
+      setDeltaT(null);
+    }
+  };
+
+  // Clear polygon
+  const clearPolygon = () => {
+    setPolygonPoints([]);
+    setDeltaT(null);
+    setIsDrawing(false);
   };
 
   return (
@@ -457,14 +605,51 @@ export default function ThermalViewer() {
               >
                 {Object.keys(palettes).map(k => <option key={k} value={k}>{k}</option>)}
               </select>
+              <Button 
+                onClick={toggleDrawing}
+                variant={isDrawing ? "destructive" : "default"}
+                disabled={isLoading || !grid.length}
+                className="px-4 py-2"
+              >
+                {isDrawing ? "Stop Drawing" : "Draw Polygon"}
+              </Button>
+              <Button 
+                onClick={clearPolygon}
+                variant="outline"
+                disabled={isLoading || polygonPoints.length === 0}
+                className="px-4 py-2"
+              >
+                Clear
+              </Button>
               {isLoading && <div className="text-sm text-muted-foreground">Processing...</div>}
               {rows && cols ? <div className="text-sm text-muted-foreground">Detected: {cols}×{rows}</div> : null}
+              {isDrawing && <div className="text-sm text-primary font-medium">Click to add polygon points</div>}
             </div>
             
             {error && (
               <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
                 <div className="text-destructive font-medium">Error</div>
                 <div className="text-destructive/80 text-sm mt-1">{error}</div>
+              </div>
+            )}
+
+            {deltaT && (
+              <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
+                <div className="text-primary font-medium mb-2">Delta T Analysis</div>
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <div className="text-muted-foreground">Min Temperature</div>
+                    <div className="font-mono text-lg">{deltaT.min.toFixed(2)}°C</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Max Temperature</div>
+                    <div className="font-mono text-lg">{deltaT.max.toFixed(2)}°C</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Delta T</div>
+                    <div className="font-mono text-lg font-bold text-primary">{deltaT.delta.toFixed(2)}°C</div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -476,9 +661,10 @@ export default function ThermalViewer() {
                   width: cols > 0 ? Math.min(960, cols * 1.5) : undefined, 
                   height: rows > 0 ? Math.min(720, rows * 1.5) : undefined
                 }} 
-                className="border rounded border-border cursor-crosshair" 
+                className={`border rounded border-border ${isDrawing ? 'cursor-crosshair' : 'cursor-crosshair'}`}
                 onMouseMove={handleMouseMove}
                 onMouseLeave={handleMouseLeave}
+                onClick={handleCanvasClick}
               />
               {hoverInfo && (
                 <div className="absolute top-2 left-2 bg-black/80 text-white px-3 py-2 rounded-lg text-sm font-mono pointer-events-none z-10">
